@@ -1,0 +1,11 @@
+#!/bin/sh
+# Bring back windows hidden by "show desktop", then maximize every window on the current workspace.
+wmctrl -k off
+cur=$(wmctrl -d | awk '$2=="*"{print $1}')
+active=$(xdotool getactivewindow 2>/dev/null)
+for id in $(wmctrl -l | awk -v d="$cur" '$2==d {print $1}'); do
+  wmctrl -i -r "$id" -b add,maximized_vert,maximized_horz
+  wmctrl -i -a "$id"
+done
+[ -n "$active" ] && xdotool windowactivate "$active" 2>/dev/null
+exit 0

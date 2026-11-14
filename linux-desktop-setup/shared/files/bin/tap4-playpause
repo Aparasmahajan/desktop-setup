@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""4-finger tap on the touchpad = play / pause (like Windows).
+
+Runs as a small system service (reading the touchpad needs root). It watches the touchpad for
+four fingers that touch and lift quickly without moving, then tells the desktop's media
+players (YouTube in the browser, VLC, Spotify, ...) to play or pause via playerctl.
+
+  tap4-playpause --user NAME     run (the service passes the desktop user)
+  tap4-playpause --user NAME -v  also print every touch to the log (journalctl -u tap4-playpause)
+"""
+import fcntl
+import glob
+import os
+import pwd
+import shutil
+import struct
+import subprocess
+import sys
+import time
+
+MAX_TAP_TIME = 0.35     # seconds from first touch to all fingers lifted
+MAX_MOVE = 0.05         # fraction of the touchpad width/height the fingers may move
+FINGERS = 4
+
+EV_SYN, EV_KEY, EV_ABS = 0, 1, 3
+ABS_X, ABS_Y, ABS_MT_POSITION_X = 0x00, 0x01, 0x35
+BTN_LEFT, BTN_TOUCH = 0x110, 0x14A
+TOOLS = {0x145: 1, 0x14D: 2, 0x14E: 3, 0x14F: 4, 0x148: 5}   # BTN_TOOL_FINGER .. QUINTTAP
+BTN_TOOL_QUADTAP = 0x14F
+EVENT = struct.Struct("llHHi")                               # struct input_event (64-bit)
+
+args = sys.argv[1:]
+USER = args[args.index("--user") + 1] if "--user" in args else None
+VERBOSE = "-v" in args
+
+
+def say(*parts):
+    print(*parts, flush=True)
+
+
+def has_bit(path, bit):
+    try:
+        words = open(path).read().split()
+    except OSError:
+        return False
+    value = int("".join(w.rjust(16, "0") for w in words), 16)  # sysfs: 64-bit words, highest first
+    return bool(value >> bit & 1)
+
+
+def find_touchpad():
+    """The event device that is a touchpad able to see 4 fingers."""
+    for dev in sorted(glob.glob("/sys/class/input/event*")):
+        caps = dev + "/device/capabilities/"
+        if has_bit(caps + "key", BTN_TOOL_QUADTAP) and has_bit(caps + "abs", ABS_MT_POSITION_X):
+            return "/dev/input/" + os.path.basename(dev)
+    return None
+
+
+def abs_range(fd, code):
+    buf = bytearray(24)                                       # struct input_absinfo: 6 ints
+    fcntl.ioctl(fd, 0x80184540 + code, buf)                   # EVIOCGABS(code)
+    _value, lo, hi = struct.unpack("iii", bytes(buf[:12]))
+    return max(1, hi - lo)
+
+
+def media(*cmd):
+    u = pwd.getpwnam(USER)
+    env = {"DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{u.pw_uid}/bus",
+           "XDG_RUNTIME_DIR": f"/run/user/{u.pw_uid}", "HOME": u.pw_dir,
+           "PATH": "/usr/local/bin:/usr/bin:/bin"}
+    runuser = shutil.which("runuser", path="/usr/sbin:/sbin:/usr/bin:/bin") or "/usr/sbin/runuser"
+    return subprocess.run([runuser, "-u", USER, "--", "playerctl", *cmd],
+                          env=env, capture_output=True, text=True, timeout=5)
+
+
+def play_pause():
+    if not USER:
+        say("no --user given, can't reach the desktop")
+        return
+    status = media("-a", "status").stdout.split()
+    if "Playing" in status:
+        media("-a", "pause")
+        say("4-finger tap: paused")
+    else:
+        r = media("play")
+        say("4-finger tap: play" + ("" if r.returncode == 0 else " (no media player found)"))
+
+
+def main():
+    path = find_touchpad()
+    if not path:
+        say("no touchpad with 4-finger support found")
+        time.sleep(30)
+        sys.exit(1)
+    fd = os.open(path, os.O_RDONLY)
+    w, h = abs_range(fd, ABS_X), abs_range(fd, ABS_Y)
+    say(f"watching {path} ({w}x{h}) for 4-finger taps")
+
+    touching = False
+    t0 = x0 = y0 = None
+    x = y = 0
+    fingers = most = 0
+    moved = clicked = False
+    while True:
+        data = os.read(fd, EVENT.size * 64)
+        if not data:
+            say("touchpad went away")
+            sys.exit(1)                                    # systemd restarts us
+        for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
+            sec, usec, etype, code, value = EVENT.unpack_from(data, i)
+            now = sec + usec / 1e6
+            if etype == EV_ABS and code in (ABS_X, ABS_Y):
+                if code == ABS_X:
+                    x = value
+                else:
+                    y = value
+                if touching and x0 is not None and (abs(x - x0) > MAX_MOVE * w or abs(y - y0) > MAX_MOVE * h):
+                    moved = True
+            elif etype == EV_KEY and code in TOOLS:
+                if value:
+                    fingers = TOOLS[code]
+                    most = max(most, fingers)
+            elif etype == EV_KEY and code == BTN_LEFT and value:
+                clicked = True
+            elif etype == EV_KEY and code == BTN_TOUCH:
+                if value:
+                    touching, t0, x0, y0 = True, now, None, None
+                    most, moved, clicked = 0, False, False
+                else:
+                    touching = False
+                    took = now - (t0 or now)
+                    if VERBOSE:
+                        say(f"touch: {most} fingers, {took:.2f}s, moved={moved}, clicked={clicked}")
+                    if most == FINGERS and took <= MAX_TAP_TIME and not moved and not clicked:
+                        try:
+                            play_pause()
+                        except Exception as e:                 # never let one failed tap stop the service
+                            say("play/pause failed:", e)
+            elif etype == EV_SYN and touching and x0 is None:
+                x0, y0 = x, y                                  # where the touch started
+
+
+if __name__ == "__main__":
+    main()

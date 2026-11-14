@@ -1,0 +1,57 @@
+# Desktop settings on this laptop (2026-11-14 18:53)
+current layout: ops
+
+## power manager
+show-panel-label = 1
+
+## window manager (xfwm4)
+/general/cycle_apps_only                 false
+/general/cycle_draw_frame                false
+/general/cycle_hidden                    false
+/general/cycle_minimized                 false
+/general/cycle_minimum                   true
+/general/cycle_preview                   true
+/general/cycle_raise                     true
+/general/cycle_tabwin_mode               0
+/general/cycle_workspaces                false
+/general/margin_top                      0
+/general/show_dock_shadow                true
+/general/workspace_count                 4
+/general/workspace_names                 [1,2,3,4]
+
+## desktop icons
+/desktop-icons/file-icons/show-filesystem     true
+/desktop-icons/file-icons/show-home           true
+/desktop-icons/file-icons/show-removable      true
+/desktop-icons/file-icons/show-trash          true
+/desktop-icons/style                          0
+
+## panel (current layout)
+/panels                                       [1,2]
+/panels/panel-1/autohide-behavior             1
+/panels/panel-1/length                        100
+/panels/panel-1/plugin-ids                    [1,2,9,10,19,12,15,13,32,14,16,17,18,34,22]
+/panels/panel-1/position                      p=6;x=0;y=0
+/panels/panel-1/position-locked               true
+/panels/panel-1/size                          30
+/panels/panel-2/autohide-behavior             2
+/panels/panel-2/background-rgba               [0.050000,0.060000,0.090000,0.000000]
+/panels/panel-2/background-style              1
+/panels/panel-2/icon-size                     36
+/panels/panel-2/length                        1.000000
+/panels/panel-2/length-adjust                 true
+/panels/panel-2/mode                          0
+/panels/panel-2/plugin-ids                    [33]
+/panels/panel-2/position                      p=10;x=0;y=0
+/panels/panel-2/position-locked               true
+/panels/panel-2/size                          52
+
+## packages
+touchegg 2.0.18
+wmctrl 1.07+git20240228.1105759-1
+xdotool 1:3.20160805.1-5.1+b2
+xfce4-docklike-plugin 0.5.1-2+b1
+xfce4-netload-plugin:amd64 1.5.0-1+b1
+xfce4-panel-profiles 1.0.15-1
+tap4-playpause service: enabled, active
+playerctl 2.4.1-4

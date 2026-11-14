@@ -1,0 +1,55 @@
+#!/bin/sh
+# Switch between desktop layouts: default (Kali), ops, floating.
+#   layout-toggle            go to the next layout (default -> ops -> floating -> default)
+#   layout-toggle <name>     switch to that layout
+L="$HOME/.local/share/layouts"
+STATE="$L/current"
+GTKCSS="$HOME/.config/gtk-3.0/gtk.css"
+ORDER="default ops floating"
+cur=$(cat "$STATE" 2>/dev/null || echo default)
+
+next() { set -- $ORDER $ORDER; while [ "$1" != "$cur" ] && [ $# -gt 0 ]; do shift; done; echo "${2:-default}"; }
+case "$1" in
+  default|ops|floating) want=$1 ;;
+  "") want=$(next) ;;
+  *) echo "usage: layout-toggle [default|ops|floating]"; exit 1 ;;
+esac
+[ "$want" = "$cur" ] && { echo "Already on $want"; exit 0; }
+
+file() { [ "$1" = default ] && echo "$L/kali-default.tar.bz2" || echo "$L/$1.tar.bz2"; }
+ws()   { xfconf-query -c xfwm4 -p /general/workspace_names $(for n in "$@"; do printf ' -t string -s %s' "$n"; done); }
+icons() { # style home trash filesystem removable
+  xfconf-query -c xfce4-desktop -p /desktop-icons/style -s "$1"
+  xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-home -s "$2"
+  xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-trash -s "$3"
+  xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-filesystem -s "$4"
+  xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/show-removable -s "$5"
+}
+
+# keep any tweaks you made to the layout you're leaving
+xfce4-panel-profiles save "$(file "$cur")"
+
+mkdir -p "$(dirname "$GTKCSS")"; touch "$GTKCSS"
+sed -i '/layout-toggle/d' "$GTKCSS"
+case "$want" in
+  ops)
+    echo "@import url(\"$L/ops-panel.css\"); /* layout-toggle */" >> "$GTKCSS"
+    ws 1 2 3 4; icons 0 true true true true
+    xfconf-query -c xfwm4 -p /general/margin_top -n -t int -s 0
+    xfconf-query -c xfwm4 -p /general/show_dock_shadow -s true ;;
+  floating)
+    echo "@import url(\"$L/floating-panel.css\"); /* layout-toggle */" >> "$GTKCSS"
+    ws 1 2 3 4; icons 2 true true false false
+    xfconf-query -c xfwm4 -p /general/margin_top -n -t int -s 44
+    xfconf-query -c xfwm4 -p /general/show_dock_shadow -s false ;;
+  default)
+    ws 1 2 3 4 5 6 7 8 9 0; icons 2 true true true true
+    xfconf-query -c xfwm4 -p /general/margin_top -n -t int -s 0
+    xfconf-query -c xfwm4 -p /general/show_dock_shadow -s true ;;
+esac
+
+xfce4-panel-profiles load "$(file "$want")"
+echo "$want" > "$STATE"
+"$HOME/.local/bin/topbar-toggle" apply   # top bar mode (auto/hide/show) + pill positions for this screen
+notify-send -i view-grid-symbolic "Desktop layout" "Switched to $want" 2>/dev/null
+exit 0

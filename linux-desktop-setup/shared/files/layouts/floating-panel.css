@@ -1,0 +1,12 @@
+/* Floating layout: rounded "island" pills at the top + the same Ghost strip dock */
+.xfce4-panel.background {
+  background-color: rgba(10, 12, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+}
+#docklike-plugin, .docklike-plugin {
+  background-color: rgba(13, 15, 23, 0.94);
+  border: 1px solid #5b8fd9;
+  border-radius: 14px;
+  padding: 2px 8px;
+}

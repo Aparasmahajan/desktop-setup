@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Switch desktop layout
+Comment=Switch between the Kali default layout and the Ops layout
+Exec=/home/paras/.local/bin/layout-toggle
+Icon=preferences-desktop-theme-global
+Terminal=false
+Categories=Settings;

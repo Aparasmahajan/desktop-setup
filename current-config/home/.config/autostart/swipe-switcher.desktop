@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Swipe app switcher
+Comment=3-finger left/right swipe opens the app switcher with previews
+Exec=python3 /home/paras/.local/bin/swipe-switcher
+Terminal=false
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Go to the next / previous window on this workspace – one step per call, in a fixed order
+# (the order the windows were opened, like a taskbar). Stops at the first / last app
+# instead of wrapping around.
+#   switch-app next     (3 fingers right – keeps stepping while you slide)
+#   switch-app prev     (3 fingers left)
+dir=${1:-next}
+desk=$(wmctrl -d | awk '$2=="*" {print $1}')
+ids=$(wmctrl -l | awk -v d="$desk" '$2==d {print $1}')
+[ -n "$ids" ] || exit 0
+n=$(printf '%s\n' "$ids" | wc -l)
+act=$(xdotool getactivewindow 2>/dev/null)
+act=$([ -n "$act" ] && printf '0x%08x' "$act")
+i=$(printf '%s\n' "$ids" | awk -v a="$act" 'tolower($1)==tolower(a) {print NR; exit}')
+if [ -z "$i" ]; then t=1
+elif [ "$dir" = prev ]; then t=$(( i > 1 ? i - 1 : 1 ))
+else t=$(( i < n ? i + 1 : n )); fi
+[ "$t" = "$i" ] && exit 0          # already at the end: stay there
+wmctrl -i -a "$(printf '%s\n' "$ids" | sed -n "${t}p")"

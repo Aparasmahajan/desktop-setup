@@ -167,7 +167,7 @@ xfce_full_install() {   # xfce_full_install LAYOUT DEFAULT_LABEL   (LAYOUT = ops
 
   say "Installing scripts and settings"
   install -d "$BIN" "$HOME/.local/share/applications" "$HOME/.config/autostart"
-  install -m 755 "$F/bin/maximize-all" "$F/bin/switch-app" "$F/bin/swipe-switcher" "$F/bin/layout-toggle" "$F/bin/topbar-toggle" "$BIN/"
+  install -m 755 "$F/bin/maximize-all" "$F/bin/switch-app" "$F/bin/swipe-switcher" "$F/bin/layout-toggle" "$F/bin/topbar-toggle" "$F/bin/topbar-watch" "$BIN/"
   sudo ln -sf "$BIN/layout-toggle" /usr/local/bin/layout-toggle   # the panel button finds them before a re-login
   sudo ln -sf "$BIN/topbar-toggle" /usr/local/bin/topbar-toggle
   install_touchegg_config
@@ -177,6 +177,15 @@ Type=Application
 Name=Swipe app switcher
 Comment=3-finger left/right swipe opens the app switcher with previews
 Exec=python3 $BIN/swipe-switcher
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+  cat > "$HOME/.config/autostart/topbar-watch.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Top bar watcher
+Comment=Keeps the top bar hidden while a maximized window is visible
+Exec=python3 $BIN/topbar-watch
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
@@ -277,9 +286,11 @@ PY
   sleep 2
   if [ "$LAYOUT" = default ]; then "$BIN/topbar-toggle" apply; else "$BIN/layout-toggle" "$LAYOUT"; fi
 
-  say "Starting the 3-finger switcher"
+  say "Starting the 3-finger switcher and the top bar watcher"
   pkill -u "$USER" -f '[s]wipe-switcher$' 2>/dev/null || true
+  pkill -u "$USER" -f 'bin/topbar-watch$' 2>/dev/null || true
   nohup python3 "$BIN/swipe-switcher" >/dev/null 2>&1 &
+  nohup python3 "$BIN/topbar-watch" >/dev/null 2>&1 &
   local XI; XI=$(xi_version)
   case "$XI" in 2.4|2.[5-9]|[3-9].*) ;; *)
     warn "Your X server reports XInput ${XI:-unknown}; the 3-finger switcher needs 2.4. 3-finger swipes won't work here." ;;
@@ -302,8 +313,9 @@ xfce_full_uninstall() {
     xfconf-query -c xfce4-desktop -p /desktop-icons/file-icons/$k -s true
   done
   pkill -u "$USER" -f '[s]wipe-switcher$' 2>/dev/null
+  pkill -u "$USER" -f 'bin/topbar-watch$' 2>/dev/null
   sudo rm -f /etc/X11/xorg.conf.d/30-touchpad.conf /usr/local/bin/layout-toggle /usr/local/bin/topbar-toggle
-  rm -f "$HOME/.config/autostart/swipe-switcher.desktop" "$BIN/swipe-switcher" "$BIN/maximize-all" "$BIN/switch-app" \
+  rm -f "$HOME/.config/autostart/swipe-switcher.desktop" "$HOME/.config/autostart/topbar-watch.desktop" "$BIN/topbar-watch" "$BIN/swipe-switcher" "$BIN/maximize-all" "$BIN/switch-app" \
         "$BIN/layout-toggle" "$BIN/topbar-toggle" "$HOME/.local/share/applications/layout-toggle.desktop"
   rm -rf "$L"
 }

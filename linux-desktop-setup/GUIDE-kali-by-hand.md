@@ -839,23 +839,32 @@ cat > ~/.local/bin/topbar-toggle <<'EOF'
 #!/bin/sh
 # Hide or show the top bar in any layout (Kali default, Ops, Floating).
 #   topbar-toggle         flip between "auto" and "show"
-#   topbar-toggle auto    visible over the desktop and small windows, hides when a window
-#                         is maximized; move the pointer to the top edge to bring it back
+#   topbar-toggle auto    visible over the desktop and small windows, hidden while any maximized
+#                         window is on screen (topbar-watch does that part); move the pointer to
+#                         the top edge to bring it back
 #   topbar-toggle hide    always hidden; move the pointer to the top edge to bring it back
 #   topbar-toggle show    always visible
 #   topbar-toggle apply   re-apply the current mode (used by layout-toggle)
+# The mode is remembered per layout in ~/.local/share/layouts/topbar-mode-<layout>.
 L="$HOME/.local/share/layouts"
 layout=$(cat "$L/current" 2>/dev/null || echo default)
 q() { xfconf-query -c xfce4-panel "$@"; }
 if [ "$layout" = floating ]; then panels="1 3 4"; else panels="1"; fi
 
-cur=$(q -p /panels/panel-1/autohide-behavior 2>/dev/null || echo 0)   # 0 show, 1 auto, 2 hide
+modefile="$L/topbar-mode-$layout"
+if [ -f "$modefile" ]; then
+  cur=$(cat "$modefile")
+else   # first time: take it from the panel (0 show, 1 auto, 2 hide)
+  case "$(q -p /panels/panel-1/autohide-behavior 2>/dev/null)" in 0) cur=show ;; 2) cur=hide ;; *) cur=auto ;; esac
+fi
 case "$1" in
-  show) ah=0 ;; auto) ah=1 ;; hide) ah=2 ;;
-  apply) ah=$cur ;;
-  "") if [ "$cur" = 0 ]; then ah=1; else ah=0; fi ;;
+  show|auto|hide) mode=$1 ;;
+  apply) mode=$cur ;;
+  "") if [ "$cur" = show ]; then mode=auto; else mode=show; fi ;;
   *) echo "usage: topbar-toggle [auto|hide|show|apply]"; exit 1 ;;
 esac
+echo "$mode" > "$modefile"
+case "$mode" in show) ah=0 ;; auto) ah=1 ;; hide) ah=2 ;; esac
 
 margin=0
 if [ "$layout" = floating ]; then
@@ -875,14 +884,211 @@ if [ "$layout" = floating ]; then
 fi
 for p in $panels; do q -p /panels/panel-$p/autohide-behavior -n -t uint -s "$ah"; done
 xfconf-query -c xfwm4 -p /general/margin_top -n -t int -s "$margin"
+pkill -USR1 -u "$USER" -f 'bin/topbar-watch( --log)?$' 2>/dev/null   # auto mode: let the watcher decide right away
 
 if [ "$1" != apply ]; then
-  case "$ah" in 0) msg="Top bar: always visible";; 1) msg="Top bar: hides behind maximized windows";; 2) msg="Top bar: always hidden";; esac
+  case "$mode" in show) msg="Top bar: always visible";; auto) msg="Top bar: hides while a window is maximized";; hide) msg="Top bar: always hidden";; esac
   notify-send -i view-grid-symbolic -t 1500 "$msg" "Move the pointer to the top edge to bring it back" 2>/dev/null
 fi
 exit 0
 EOF
 chmod +x ~/.local/bin/topbar-toggle
+```
+
+Keep the top bar hidden while **any** maximized window is visible (XFCE's own auto-hide only looks at
+the active window, so a small window in front of a maximized one would make the bar appear):
+
+```bash
+cat > ~/.local/bin/topbar-watch <<'EOF'
+#!/usr/bin/env python3
+"""Keep the top bar hidden while a maximized window is visible (XFCE).
+
+XFCE's own "intelligent" auto-hide only looks at the *active* window, so a small window in front
+of a maximized one makes the bar appear. This watcher looks at every window on the current
+workspace: while any of them is maximized (or full screen) and not minimized, the top bar is set
+to "always hidden" (move the pointer to the top edge to bring it back); otherwise it goes back
+to XFCE's intelligent mode. It only acts when the layout's top-bar mode is "auto"
+(see topbar-toggle). It waits for window changes from X instead of polling.
+
+  topbar-watch          run (started automatically at login)
+  topbar-watch --log    also log decisions to ~/.cache/topbar-watch.log
+"""
+import ctypes
+import ctypes.util
+import os
+import select
+import signal
+import subprocess
+import sys
+import time
+
+L = os.path.expanduser("~/.local/share/layouts")
+LOG = os.path.expanduser("~/.cache/topbar-watch.log") if "--log" in sys.argv else None
+
+c_int, c_ulong, c_long, c_void_p, c_char_p = ctypes.c_int, ctypes.c_ulong, ctypes.c_long, ctypes.c_void_p, ctypes.c_char_p
+X = ctypes.CDLL(ctypes.util.find_library("X11"))
+X.XOpenDisplay.restype = c_void_p
+X.XOpenDisplay.argtypes = [c_char_p]
+X.XDefaultRootWindow.restype = c_ulong
+X.XDefaultRootWindow.argtypes = [c_void_p]
+X.XInternAtom.restype = c_ulong
+X.XInternAtom.argtypes = [c_void_p, c_char_p, c_int]
+X.XSelectInput.argtypes = [c_void_p, c_ulong, c_long]
+X.XGetWindowProperty.argtypes = [c_void_p, c_ulong, c_ulong, c_long, c_long, c_int, c_ulong,
+                                 ctypes.POINTER(c_ulong), ctypes.POINTER(c_int), ctypes.POINTER(c_ulong),
+                                 ctypes.POINTER(c_ulong), ctypes.POINTER(ctypes.POINTER(c_ulong))]
+X.XFree.argtypes = [c_void_p]
+X.XPending.argtypes = [c_void_p]
+X.XNextEvent.argtypes = [c_void_p, c_void_p]
+X.XConnectionNumber.argtypes = [c_void_p]
+X.XFlush.argtypes = [c_void_p]
+ERRH = ctypes.CFUNCTYPE(c_int, c_void_p, c_void_p)
+_ignore_errors = ERRH(lambda d, e: 0)            # windows can vanish between events: ignore BadWindow
+X.XSetErrorHandler(_ignore_errors)
+
+PropertyNotify, PropertyChangeMask, AnyPropertyType = 28, 1 << 22, 0
+
+
+class XPropertyEvent(ctypes.Structure):
+    _fields_ = [("type", c_int), ("serial", c_ulong), ("send_event", c_int), ("display", c_void_p),
+                ("window", c_ulong), ("atom", c_ulong), ("time", c_ulong), ("state", c_int)]
+
+
+class XEvent(ctypes.Union):
+    _fields_ = [("type", c_int), ("xproperty", XPropertyEvent), ("pad", c_long * 24)]
+
+
+dpy = X.XOpenDisplay(None)
+if not dpy:
+    sys.exit("topbar-watch: no X display")
+root = X.XDefaultRootWindow(dpy)
+A = {n: X.XInternAtom(dpy, n.encode(), 0) for n in (
+    "_NET_CLIENT_LIST", "_NET_CLIENT_LIST_STACKING", "_NET_ACTIVE_WINDOW", "_NET_CURRENT_DESKTOP",
+    "_NET_WM_DESKTOP", "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_STATE_HIDDEN",
+    "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_WINDOW_TYPE_NORMAL", "_NET_WM_WINDOW_TYPE_DIALOG", "_NET_SHOWING_DESKTOP")}
+WATCH = {A["_NET_CLIENT_LIST"], A["_NET_CLIENT_LIST_STACKING"], A["_NET_ACTIVE_WINDOW"],
+         A["_NET_CURRENT_DESKTOP"], A["_NET_WM_DESKTOP"], A["_NET_WM_STATE"], A["_NET_SHOWING_DESKTOP"]}
+
+
+def log(*parts):
+    if LOG:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + " ".join(map(str, parts)) + "\n")
+
+
+def prop(win, atom):
+    """A window property as a list of 32-bit values (X returns them as C longs)."""
+    t, fmt, n, after = c_ulong(), c_int(), c_ulong(), c_ulong()
+    data = ctypes.POINTER(c_ulong)()
+    if X.XGetWindowProperty(dpy, win, atom, 0, 1024, 0, AnyPropertyType, ctypes.byref(t), ctypes.byref(fmt),
+                            ctypes.byref(n), ctypes.byref(after), ctypes.byref(data)) != 0 or not data:
+        return []
+    values = [data[i] for i in range(n.value)] if fmt.value == 32 else []
+    X.XFree(data)
+    return values
+
+
+watched = set()
+
+
+def watch_windows(clients):
+    for w in clients:
+        if w not in watched:
+            X.XSelectInput(dpy, w, PropertyChangeMask)
+            watched.add(w)
+    watched.intersection_update(clients)
+
+
+def maximized_window_visible():
+    clients = prop(root, A["_NET_CLIENT_LIST"])
+    watch_windows(clients)
+    cur = (prop(root, A["_NET_CURRENT_DESKTOP"]) or [0])[0]
+    for w in clients:
+        types = prop(w, A["_NET_WM_WINDOW_TYPE"])
+        if types and not ({A["_NET_WM_WINDOW_TYPE_NORMAL"], A["_NET_WM_WINDOW_TYPE_DIALOG"]} & set(types)):
+            continue
+        desk = (prop(w, A["_NET_WM_DESKTOP"]) or [cur])[0]
+        if desk != cur and desk != 0xFFFFFFFF:
+            continue
+        state = set(prop(w, A["_NET_WM_STATE"]))
+        if A["_NET_WM_STATE_HIDDEN"] in state:
+            continue
+        if A["_NET_WM_STATE_FULLSCREEN"] in state or \
+           {A["_NET_WM_STATE_MAXIMIZED_VERT"], A["_NET_WM_STATE_MAXIMIZED_HORZ"]} <= state:
+            return True
+    return False
+
+
+applied = {"key": None}
+
+
+def read(path, default):
+    try:
+        return open(path).read().strip() or default
+    except OSError:
+        return default
+
+
+def decide():
+    layout = read(f"{L}/current", "default")
+    mode = read(f"{L}/topbar-mode-{layout}", "auto")
+    if mode != "auto":
+        applied["key"] = None
+        return
+    hide = maximized_window_visible()
+    key = (layout, hide)
+    if key == applied["key"]:
+        return
+    behavior = "2" if hide else "1"             # 2 = always hidden, 1 = XFCE intelligent
+    for p in (("1", "3", "4") if layout == "floating" else ("1",)):
+        subprocess.run(["xfconf-query", "-c", "xfce4-panel", "-p", f"/panels/panel-{p}/autohide-behavior",
+                        "-n", "-t", "uint", "-s", behavior], check=False)
+    applied["key"] = key
+    log("layout", layout, "maximized window visible" if hide else "no maximized window", "-> autohide", behavior)
+
+
+def refresh(*_):
+    applied["key"] = None                         # topbar-toggle / layout switch: re-apply now
+    pending["at"] = time.monotonic()
+
+
+pending = {"at": time.monotonic()}
+signal.signal(signal.SIGUSR1, refresh)
+X.XSelectInput(dpy, root, PropertyChangeMask)
+X.XFlush(dpy)
+log("started")
+
+fd = X.XConnectionNumber(dpy)
+ev = XEvent()
+last_layout = None
+while True:
+    while X.XPending(dpy):
+        X.XNextEvent(dpy, ctypes.byref(ev))
+        if ev.type == PropertyNotify and ev.xproperty.atom in WATCH:
+            pending["at"] = pending["at"] or time.monotonic()
+    if pending["at"] and time.monotonic() - pending["at"] >= 0.08:   # let a burst of changes settle
+        pending["at"] = 0
+        decide()
+    layout = read(f"{L}/current", "default")
+    if layout != last_layout:                      # switched layout: panels were reloaded
+        last_layout = layout
+        refresh()
+    try:
+        select.select([fd], [], [], 0.1 if pending["at"] else 2.0)
+    except InterruptedError:
+        pass
+EOF
+chmod +x ~/.local/bin/topbar-watch
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/topbar-watch.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Top bar watcher
+Exec=python3 $HOME/.local/bin/topbar-watch
+Terminal=false
+EOF
+nohup python3 ~/.local/bin/topbar-watch >/dev/null 2>&1 &
 ```
 
 Menu entry (appears in the Kali app menu):

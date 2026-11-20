@@ -37,6 +37,8 @@ Then log out and back in once. What you get depends on the system – see `linux
 | `home/.local/bin/swipe-switcher` | 3-finger gestures: app switcher with previews, rows, show desktop, maximize all |
 | `home/.local/bin/layout-toggle` | switch layouts: `layout-toggle default`/`ops`/`floating` |
 | `home/.local/bin/topbar-toggle` | top bar: `topbar-toggle auto`/`hide`/`show` |
+| `home/.local/bin/topbar-watch` | keeps the top bar hidden while any maximized window is visible (auto mode) |
+| `home/.config/autostart/topbar-watch.desktop` | starts the top bar watcher at login |
 | `home/.local/bin/maximize-all` | helper for 3 fingers up |
 | `home/.local/bin/switch-app` | older step-by-step app switcher (not used by gestures any more) |
 | `home/.config/touchegg/touchegg.conf` | 4-finger gestures (workspaces, volume) |

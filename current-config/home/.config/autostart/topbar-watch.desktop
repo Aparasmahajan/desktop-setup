@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Top bar watcher
+Comment=Keeps the top bar hidden while a maximized window is visible
+Exec=python3 /home/paras/.local/bin/topbar-watch
+Terminal=false
+X-GNOME-Autostart-enabled=true

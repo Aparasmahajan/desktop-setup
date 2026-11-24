@@ -105,6 +105,136 @@ remove_tap4() {
   sudo systemctl daemon-reload
 }
 
+# ---------------------------------------------------------------- Super+Shift+S snipping tool + Super+V clipboard history
+SNIP_CMD="flameshot gui"
+CLIP_CMD="copyq menu"
+gs_list_add() {   # gs_list_add SCHEMA KEY ITEM – add ITEM to a string-list setting (backed up by gs_set)
+  local cur new
+  gs_has "$1" "$2" || return 0
+  cur=$(gsettings get "$1" "$2")
+  new=$(python3 - "$cur" "$3" <<'PY2'
+import ast, sys
+cur, item = sys.argv[1], sys.argv[2]
+items = ast.literal_eval(cur.replace("@as ", "", 1)) if cur.strip() not in ("", "@as []") else []
+if item not in items: items.append(item)
+print("[" + ", ".join(repr(i) for i in items) + "]")
+PY2
+)
+  gs_set "$1" "$2" "$new"
+}
+gs_list_drop() {  # gs_list_drop SCHEMA KEY ITEM – take ITEM out of a string-list setting
+  local cur new
+  gs_has "$1" "$2" || return 0
+  cur=$(gsettings get "$1" "$2")
+  new=$(python3 - "$cur" "$3" <<'PY2'
+import ast, sys
+cur, item = sys.argv[1], sys.argv[2]
+items = ast.literal_eval(cur.replace("@as ", "", 1)) if cur.strip() not in ("", "@as []") else []
+print("[" + ", ".join(repr(i) for i in items if i != item) + "]")
+PY2
+)
+  [ "$new" = "$cur" ] || gs_set "$1" "$2" "$new"
+}
+
+flameshot_settings() {
+  install -d "$HOME/.config/flameshot" "$HOME/Pictures/Screenshots"
+  python3 - "$HOME/.config/flameshot/flameshot.ini" <<'PY2'
+import configparser, os, sys
+p = sys.argv[1]
+c = configparser.ConfigParser(); c.optionxform = str
+if os.path.exists(p): c.read(p)
+if "General" not in c: c["General"] = {}
+c["General"].update({"showStartupLaunchMessage": "false", "checkForUpdates": "false",
+                     "copyOnDoubleClick": "true", "saveAfterCopy": "false",
+                     "savePath": os.path.expanduser("~/Pictures/Screenshots"), "savePathFixed": "false",
+                     "disabledTrayIcon": "true", "showHelp": "true"})
+with open(p, "w") as f: c.write(f, space_around_delimiters=False)
+PY2
+}
+
+copyq_settings() {   # Windows-style Win+V: list at the mouse, picking an item pastes it
+  pgrep -x -u "$USER" copyq >/dev/null || { nohup copyq >/dev/null 2>&1 & sleep 2; }
+  local kv
+  for kv in autostart=true tray_item_paste=true activate_pastes=true activate_closes=true activate_focuses=true \
+            close_on_unfocus=true tray_items=25 tray_images=true maxitems=300 check_clipboard=true check_selection=false; do
+    copyq config "${kv%%=*}" "${kv#*=}" >/dev/null 2>&1 || warn "CopyQ setting ${kv%%=*} not applied"
+  done
+  if [ "${XDG_SESSION_TYPE:-}" = wayland ]; then   # CopyQ sees the clipboard reliably on Wayland only via XWayland
+    sed -i 's|^Exec=copyq|Exec=env QT_QPA_PLATFORM=xcb copyq|' "$HOME/.config/autostart/com.github.hluk.copyq.desktop" 2>/dev/null || true
+    CLIP_CMD="env QT_QPA_PLATFORM=xcb copyq menu"
+  fi
+}
+
+other_clipboard_managers_off() {   # two clipboard managers fight over the clipboard: keep only CopyQ
+  local f=/etc/xdg/autostart/xfce4-clipman-plugin-autostart.desktop u="$HOME/.config/autostart/xfce4-clipman-plugin-autostart.desktop"
+  if [ -f "$f" ] || [ -f "$u" ]; then
+    mkdir -p "$STATE" "$HOME/.config/autostart"
+    if [ -f "$u" ]; then cp "$u" "$STATE/clipman-autostart.bak"; else cp "$f" "$u"; mark clipman-override; fi
+    if grep -q '^Hidden=' "$u"; then sed -i 's/^Hidden=.*/Hidden=true/' "$u"; else echo "Hidden=true" >> "$u"; fi
+  fi
+  pkill -x -u "$USER" xfce4-clipman 2>/dev/null || true
+}
+
+snip_clip_shortcuts() {   # snip_clip_shortcuts DESKTOP
+  local g=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings c=/org/cinnamon/desktop/keybindings/custom-keybindings n
+  case "$1" in
+    xfce)
+      xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super>v' -n -t string -s "$CLIP_CMD"
+      xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super><Shift>s' -n -t string -s "$SNIP_CMD"
+      mark xfce-shortcuts ;;
+    gnome)   # GNOME opens its notification list with Super+V (and Super+M) – leave it on Super+M
+      gs_list_drop org.gnome.shell.keybindings toggle-message-tray '<Super>v'
+      for n in snip clip; do
+        local schema="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$g/lds-$n/"
+        if [ $n = snip ]; then gs_set "$schema" name "'Snipping tool'"; gs_set "$schema" command "'$SNIP_CMD'"; gs_set "$schema" binding "'<Super><Shift>s'"
+        else gs_set "$schema" name "'Clipboard history'"; gs_set "$schema" command "'$CLIP_CMD'"; gs_set "$schema" binding "'<Super>v'"; fi
+        gs_list_add org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$g/lds-$n/"
+      done ;;
+    cinnamon)
+      for n in snip clip; do
+        local schema="org.cinnamon.desktop.keybindings.custom-keybinding:$c/lds-$n/"
+        if [ $n = snip ]; then gs_set "$schema" name "'Snipping tool'"; gs_set "$schema" command "'$SNIP_CMD'"; gs_set "$schema" binding "['<Super><Shift>s']"
+        else gs_set "$schema" name "'Clipboard history'"; gs_set "$schema" command "'$CLIP_CMD'"; gs_set "$schema" binding "['<Super>v']"; fi
+        gs_list_add org.cinnamon.desktop.keybindings custom-list "lds-$n"
+      done ;;
+    mate)    # Marco's numbered command slots: use the first two free ones
+      local used=0 i
+      for i in $(seq 1 12); do
+        [ "$used" -ge 2 ] && break
+        gs_has org.mate.Marco.keybinding-commands "command-$i" || continue
+        [ "$(gsettings get org.mate.Marco.keybinding-commands "command-$i")" = "''" ] || continue
+        if [ "$used" = 0 ]; then gs_set org.mate.Marco.keybinding-commands "command-$i" "'$SNIP_CMD'"; gs_set org.mate.Marco.global-keybindings "run-command-$i" "'<Shift><Mod4>s'"
+        else gs_set org.mate.Marco.keybinding-commands "command-$i" "'$CLIP_CMD'"; gs_set org.mate.Marco.global-keybindings "run-command-$i" "'<Mod4>v'"; fi
+        used=$((used + 1))
+      done ;;
+    *) note "No shortcuts set on this desktop – start them from the menu: Flameshot, CopyQ." ;;
+  esac
+}
+
+snip_clip_install() {
+  say "Snipping tool (Super+Shift+S) and clipboard history (Super+V)"
+  dpkg -s flameshot >/dev/null 2>&1 || mark installed-flameshot
+  dpkg -s copyq >/dev/null 2>&1 || mark installed-copyq
+  apt_install flameshot copyq
+  command -v flameshot >/dev/null && flameshot_settings
+  command -v copyq >/dev/null && { other_clipboard_managers_off; copyq_settings; }
+  snip_clip_shortcuts "$(desktop)"
+}
+
+snip_clip_remove() {
+  if marked xfce-shortcuts; then
+    xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super>v' -r 2>/dev/null
+    xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super><Shift>s' -r 2>/dev/null
+  fi
+  local u="$HOME/.config/autostart/xfce4-clipman-plugin-autostart.desktop"
+  if [ -f "$STATE/clipman-autostart.bak" ]; then cp "$STATE/clipman-autostart.bak" "$u"
+  elif marked clipman-override; then rm -f "$u"; fi
+  if marked installed-copyq; then
+    copyq exit >/dev/null 2>&1; rm -f "$HOME/.config/autostart/com.github.hluk.copyq.desktop"; sudo apt-get remove -y copyq
+  fi
+  marked installed-flameshot && { pkill -x -u "$USER" flameshot 2>/dev/null; sudo apt-get remove -y flameshot; }
+}
+
 # ---------------------------------------------------------------- desktop settings (GNOME / Cinnamon / MATE)
 gs_has() { gsettings list-keys "$1" 2>/dev/null | grep -qx "$2"; }
 gs_set() {   # gs_set SCHEMA KEY VALUE – remembers the old value once, so uninstall can put it back
@@ -375,12 +505,14 @@ install_for_this_desktop() {   # install_for_this_desktop LAYOUT DEFAULT_LABEL
     mate)     mate_install ;;
     *)        other_install ;;
   esac
+  snip_clip_install
 }
 
 uninstall_everything() {
   local profile; profile=$(cat "$STATE/profile" 2>/dev/null || echo unknown)
   say "Removing the setup ($profile)"
   [ "$profile" = xfce ] && xfce_full_uninstall
+  snip_clip_remove
   gs_restore
   remove_touchegg_stuff
   remove_tap4

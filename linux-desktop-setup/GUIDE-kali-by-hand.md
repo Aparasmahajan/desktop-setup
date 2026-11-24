@@ -671,6 +671,27 @@ sudo systemctl daemon-reload && sudo systemctl enable --now tap4-playpause
 
 Check it: `journalctl -u tap4-playpause -f`, then tap with 4 fingers.
 
+## Super+Shift+S snipping tool and Super+V clipboard history
+
+Flameshot (snipping tool) and CopyQ (clipboard history), both open source and in Kali's package list.
+Kali's own Clipman is switched off, because two clipboard managers fight over the clipboard.
+
+```bash
+sudo apt install flameshot copyq
+```
+
+```bash
+sed -i 's/^Hidden=.*/Hidden=true/' ~/.config/autostart/xfce4-clipman-plugin-autostart.desktop 2>/dev/null || { mkdir -p ~/.config/autostart; cp /etc/xdg/autostart/xfce4-clipman-plugin-autostart.desktop ~/.config/autostart/ && sed -i 's/^Hidden=.*/Hidden=true/' ~/.config/autostart/xfce4-clipman-plugin-autostart.desktop; }
+pkill -x xfce4-clipman; nohup copyq >/dev/null 2>&1 & sleep 2
+for kv in autostart=true tray_item_paste=true activate_pastes=true activate_closes=true activate_focuses=true close_on_unfocus=true tray_items=25 tray_images=true maxitems=300 check_clipboard=true check_selection=false; do copyq config "${kv%%=*}" "${kv#*=}"; done
+xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super>v' -n -t string -s 'copyq menu'
+xfconf-query -c xfce4-keyboard-shortcuts -p '/commands/custom/<Super><Shift>s' -n -t string -s 'flameshot gui'
+```
+
+**Super+Shift+S:** drag to pick an area, mark it up (arrows, boxes, blur, text), then Enter or Ctrl+C copies it, Ctrl+S saves it.
+For the whole screen, drag across all of it (or use Ctrl+Print, which copies the full screen).
+**Super+V:** the list opens at the mouse – type to search, Enter or click pastes into the window you were in.
+
 ## Troubleshooting
 
 **Gestures do nothing**
@@ -1190,6 +1211,8 @@ xfconf-query -c xfwm4 -p /general/show_dock_shadow -s true
 | 4 fingers left / right | Next / previous workspace |
 | 4 fingers up / down | Volume up / down |
 | 4-finger tap | Play / pause music or video |
+| **Super+Shift+S** | Snipping tool (area, mark up, copy) |
+| **Super+V** | Clipboard history (search, pastes on pick) |
 | Tap | Click |
 | Pointer to bottom edge | Show the dock |
 | Pointer to top edge | Show the top bar (when it's hidden) |

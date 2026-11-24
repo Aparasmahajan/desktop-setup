@@ -42,6 +42,10 @@ Then log out and back in once. What you get depends on the system – see `linux
 | `home/.local/bin/maximize-all` | helper for 3 fingers up |
 | `home/.local/bin/switch-app` | older step-by-step app switcher (not used by gestures any more) |
 | `home/.config/touchegg/touchegg.conf` | 4-finger gestures (workspaces, volume) |
+| `home/.config/flameshot/flameshot.ini` | Super+Shift+S snipping tool settings (save folder ~/Pictures/Screenshots, no tray icon) |
+| `home/.config/copyq/copyq.conf` | Super+V clipboard history settings (300 items, images, pastes on pick) |
+| `home/.config/autostart/com.github.hluk.copyq.desktop` | starts CopyQ at login |
+| `home/.config/autostart/xfce4-clipman-plugin-autostart.desktop` | keeps Kali's own Clipman off (two clipboard managers fight) |
 | `home/.config/autostart/swipe-switcher.desktop` | starts the 3-finger switcher at login |
 | `home/.local/share/layouts/` | saved layouts (Kali default, Ops, Floating), their styles, backups |
 | `home/.local/share/applications/layout-toggle.desktop` | "Switch desktop layout" menu entry |

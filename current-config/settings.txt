@@ -55,3 +55,9 @@ xfce4-netload-plugin:amd64 1.5.0-1+b1
 xfce4-panel-profiles 1.0.15-1
 tap4-playpause service: enabled, active
 playerctl 2.4.1-4
+
+## shortcuts (Super+V clipboard history, Super+Shift+S snipping tool)
+/commands/custom/<Super><Shift>s           flameshot gui
+/commands/custom/<Super>v                  copyq menu
+copyq 17.0.0-1
+flameshot 14.0.0-4

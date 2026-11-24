@@ -24,6 +24,8 @@ You can also run a system's own installer directly: `kali/install.sh`, `ubuntu/i
 |---|---|---|---|---|
 | Tap to click, natural scrolling | ✅ | ✅ | ✅ | ✅ |
 | 4-finger tap = play / pause | ✅ | ✅ | ✅ | ✅ |
+| **Super+Shift+S** snipping tool (Flameshot: area, mark up, copy) | ✅ | ✅ | ✅ | ✅ |
+| **Super+V** clipboard history (CopyQ: text + images, search, pastes on pick) | ✅ | ✅ | ✅ | ✅ |
 | 4 fingers ←/→ workspaces, ↑/↓ volume | ✅ | GNOME's own swipes | Mint's own gestures | ✅ |
 | 3-finger app switcher with previews (↑/↓ rows) | ✅ | – | – | – |
 | 3 fingers ↓ desktop / ↑ maximize all | ✅ | – | – | – |
@@ -32,7 +34,7 @@ You can also run a system's own installer directly: `kali/install.sh`, `ubuntu/i
 | Battery percentage | ✅ | ✅ | – | – |
 
 Other Ubuntu/Debian-based systems (Pop!_OS, Zorin, …) use the Ubuntu installer, which picks by
-desktop. KDE and others get only the 4-finger tap. Non-Debian systems (Fedora, Arch) aren't supported.
+desktop. KDE and others get the 4-finger tap plus Flameshot and CopyQ (start them from the menu; no shortcuts set). Non-Debian systems (Fedora, Arch) aren't supported.
 
 ## Needs
 
